@@ -1,5 +1,5 @@
 
-iHmmNormalSampleBeam <- function(Y, hypers, numb, nums, numi, S0) {
+iHmmNormalSampleBeam <- function(Y, hypers, numb=100, nums=1000, numi=5, S0) {
   # Y: numeric vector (length T)
   # hypers: list with either alpha0/gamma or alpha0_a,alpha0_b,gamma_a,gamma_b, and mu_0, sigma2_0, sigma2
   # numb: burn-in iterations
@@ -10,6 +10,11 @@ iHmmNormalSampleBeam <- function(Y, hypers, numb, nums, numi, S0) {
   Tlen <- length(Y)
   
   sample <- list()
+  
+  if(is.null(S0)){
+    S0=sample(1:5,Ylen)
+  }
+  
   sample$S <- as.integer(S0)
   sample$K <- max(sample$S)
   
@@ -386,4 +391,66 @@ iHmmNormalJointLogLikelihood <- function(S, Y, Beta, alpha0, mu_0, sigma2_0, sig
   }
   
   as.numeric(logp)
+}
+
+
+
+# Simulation --------------------------------------------------------------
+
+sim_data_stud_t=function(seed=123,
+                         TT,
+                         P,
+                         Ktrue=3,
+                         mu=1.5,
+                         rho=0,
+                         nu=4,
+                         pers=.95){
+  
+  
+  MU=seq(mu, -mu, length.out=Ktrue)
+  
+  # Markov chain simulation
+  x <- numeric(TT)
+  Q <- matrix(rep((1-pers)/(Ktrue-1),Ktrue*Ktrue), 
+              ncol = Ktrue,
+              byrow = TRUE)
+  diag(Q)=rep(pers,Ktrue)
+  init <- rep(1/Ktrue,Ktrue)
+  set.seed(seed)
+  x[1] <- sample(1:Ktrue, 1, prob = init)
+  for(i in 2:TT){
+    x[i] <- sample(1:Ktrue, 1, prob = Q[x[i - 1], ])
+  }
+  
+  # Continuous variables simulation
+  Sigma <- matrix(rho,ncol=P,nrow=P)
+  diag(Sigma)=1
+  
+  Sim = matrix(0, TT, P * Ktrue)
+  SimData = matrix(0, TT, P)
+  
+  set.seed(seed)
+  for(k in 1:Ktrue){
+    # u = MASS::mvrnorm(TT,rep(mu[k],P),Sigma)
+    u = mvtnorm::rmvt(TT, sigma = (nu-2)*Sigma/nu, df = nu, delta = rep(MU[k],P))
+    Sim[, (P * k - P + 1):(k * P)] = u
+  }
+  
+  for (i in 1:TT) {
+    k = x[i]
+    SimData[i, ] = Sim[i, (P * k - P + 1):(P * k)]
+  }
+  
+  SimData=data.frame(SimData)
+  
+  return(list(
+    SimData=SimData,
+    mchain=x,
+    TT=TT,
+    P=P,
+    K=Ktrue,
+    Ktrue=Ktrue,
+    pers=pers, 
+    seed=seed))
+  
 }
