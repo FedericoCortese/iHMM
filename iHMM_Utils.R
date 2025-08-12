@@ -1,5 +1,5 @@
 
-iHmmNormalSampleBeam <- function(Y, hypers, numb=100, nums=1000, numi=5, S0) {
+iHmmNormalSampleBeam <- function(Y, hypers=NULL, numb=100, nums=1000, numi=5, S0=NULL) {
   # Y: numeric vector (length T)
   # hypers: list with either alpha0/gamma or alpha0_a,alpha0_b,gamma_a,gamma_b, and mu_0, sigma2_0, sigma2
   # numb: burn-in iterations
@@ -11,8 +11,13 @@ iHmmNormalSampleBeam <- function(Y, hypers, numb=100, nums=1000, numi=5, S0) {
   
   sample <- list()
   
+  if(is.null(hypers)){
+    hypers$alpha0=NULL
+    hypers$gamma=NULL
+  }
+  
   if(is.null(S0)){
-    S0=sample(1:5,Ylen)
+    S0=sample(1:5,Tlen,replace=T)
   }
   
   sample$S <- as.integer(S0)

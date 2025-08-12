@@ -8,4 +8,9 @@ temp=sim_data_stud_t(seed=123,
                          nu=40,
                          pers=.95)
 
-Y=temp$SimData
+Y=temp$SimData[,1]
+hypers=NULL
+numb=100
+nums=1000
+numi=5
+S0=NULL
