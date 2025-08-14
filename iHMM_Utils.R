@@ -12,12 +12,12 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL, numb=100, nums=1000, numi=5, S0
   sample <- list()
   
   if(is.null(hypers)){
-    hypers$alpha0=NULL
-    hypers$gamma=NULL
+    hypers$alpha0=1
+    hypers$gamma=1
   }
   
   if(is.null(S0)){
-    S0=sample(1:5,Tlen,replace=T)
+    S0=sample(1:2,Tlen,replace=T)
   }
   
   sample$S <- as.integer(S0)
@@ -59,7 +59,7 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL, numb=100, nums=1000, numi=5, S0
   # Sample the emission and transition probabilities.
   sample$Mus <- SampleNormalMeans_R(sample$S, Y, sample$K, hypers$sigma2, hypers$mu_0, hypers$sigma2_0)
   sample$Pi  <- SampleTransitionMatrix(sample$S, sample$alpha0 * sample$Beta)
-  # Remove the (K+1)-th row as in MATLAB
+  # Remove the (K+1)-th row 
   sample$Pi  <- sample$Pi[-(sample$K + 1L), , drop = FALSE]
   
   iter <- 1L
@@ -269,26 +269,34 @@ SampleNormalMeans_R <- function(S, Y, K, sigma2, mu_0, sigma2_0) {
 }
 
 # ------ iHmmHyperSample ------
+
 iHmmHyperSample <- function(S, ibeta, ialpha0, igamma, hypers, numi) {
   K <- length(ibeta) - 1L
   Tlen <- length(S)
   
-  # N: transition counts (K+1 x K+1 so we can index safely)
+  # N: transition counts (K x K)
   N <- matrix(0, nrow = K, ncol = K)
-  # Count "start" -> S[1]
   N[1L, S[1L]] <- N[1L, S[1L]] + 1L
   for (t in 2:Tlen) {
     N[S[t - 1L], S[t]] <- N[S[t - 1L], S[t]] + 1L
   }
   
-  # M: number of tables (K x K)
+  # M: number of components (K x K)
   M <- matrix(0, nrow = K, ncol = K)
   for (j in 1:K) {
     for (k in 1:K) {
       if (N[j, k] > 0) {
         for (ell in 1:N[j, k]) {
-          p <- (ialpha0 * ibeta[k]) / (ialpha0 * ibeta[k] + ell - 1)
-          M[j, k] <- M[j, k] + rbinom(1L, size = 1L, prob = p)
+          num <- ialpha0 * ibeta[k]
+          denom <- num + ell - 1
+          if (is.finite(num) && is.finite(denom) && denom > 0 && num >= 0) {
+            p <- num / denom
+            # Safety check for p
+            p <- max(min(p, 1), 0)
+            if (!is.na(p) && p >= 0 && p <= 1) {
+              M[j, k] <- M[j, k] + rbinom(1L, size = 1L, prob = p)
+            }
+          }
         }
       }
     }
@@ -298,36 +306,48 @@ iHmmHyperSample <- function(S, ibeta, ialpha0, igamma, hypers, numi) {
   m_dotk <- colSums(M)
   ibeta  <- dirichlet_sample(c(m_dotk, igamma))
   
-  # Resample alpha0 (Escobar & West style for HDP rows)
+  # -- Se alpha0 è specificato, non ricampionarlo --
   if (!is.null(hypers$alpha0)) {
     ialpha0 <- hypers$alpha0
   } else {
     for (iter in 1:numi) {
-      Nj <- rowSums(N)                          # length K
+      Nj <- rowSums(N)
       w  <- rbeta(K, shape1 = ialpha0 + 1, shape2 = Nj)
+      w[!is.finite(w)] <- 1e-3
       p  <- Nj / ialpha0
       p  <- p / (p + 1)
+      p[!is.finite(p)] <- 0.5
       s  <- rbinom(K, size = 1L, prob = p)
+      
       shape <- hypers$alpha0_a + sum(M) - sum(s)
       rate  <- hypers$alpha0_b - sum(log(w))
-      ialpha0 <- rgamma(1L, shape = shape, rate = rate)
+      
+      if (is.finite(shape) && is.finite(rate) && shape > 0 && rate > 0) {
+        ialpha0 <- rgamma(1L, shape = shape, rate = rate)
+      }
     }
   }
+  ialpha0 <- max(ialpha0, 1e-3)
   
-  # Resample gamma (Escobar & West 1995)
+  # -- Se gamma è specificato, non ricampionarlo --
   if (!is.null(hypers$gamma)) {
     igamma <- hypers$gamma
   } else {
-    k <- length(ibeta)        # == K+1
+    k <- length(ibeta)
     m <- sum(M)
     for (iter in 1:numi) {
       mu    <- rbeta(1L, shape1 = igamma + 1, shape2 = m)
+      if (!is.finite(mu) || mu <= 0) mu <- 1e-3
       pi_mu <- 1 / (1 + (m * (hypers$gamma_b - log(mu))) / (hypers$gamma_a + k - 1))
+      pi_mu <- ifelse(is.finite(pi_mu), pi_mu, 0.5)
       shape <- if (runif(1L) < pi_mu) hypers$gamma_a + k else hypers$gamma_a + k - 1
       rate  <- hypers$gamma_b - log(mu)
-      igamma <- rgamma(1L, shape = shape, rate = rate)
+      if (is.finite(shape) && is.finite(rate) && shape > 0 && rate > 0) {
+        igamma <- rgamma(1L, shape = shape, rate = rate)
+      }
     }
   }
+  igamma <- max(igamma, 1e-3)
   
   list(Beta = ibeta, alpha0 = ialpha0, gamma = igamma, N = N, M = M)
 }
