@@ -10,13 +10,15 @@ temp=sim_data_stud_t(seed=123,
 
 Y=temp$SimData[,1]
 
+hypers=NULL
+
 hypers=list()
 hypers$alpha0_a = 4;
 hypers$alpha0_b = 1;
 hypers$gamma_a = 3;
 hypers$gamma_b = 6;
-# hypers$alpha0= 1.5;
-# hypers$gamma= 1.5;
+hypers$alpha0= 1;
+hypers$gamma= 1;
 hypers$sigma2 = 1.5;
 hypers$mu_0 = 0.0;
 hypers$sigma2_0 = 1.0;
@@ -26,4 +28,4 @@ nums=1000
 numi=1
 S0=NULL
 
-fit=iHmmNormalSampleBeam(Y, hypers=hypers, numb=100, nums=1000, numi=5, S0=NULL)
+fit=iHmmNormalSampleBeam(Y, hypers=hypers, numb=100, nums=1000, numi=5, S0=NULL,K0=5)

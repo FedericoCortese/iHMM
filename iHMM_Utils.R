@@ -1,5 +1,10 @@
 
-iHmmNormalSampleBeam <- function(Y, hypers=NULL, numb=100, nums=1000, numi=5, S0=NULL) {
+iHmmNormalSampleBeam <- function(Y, hypers=NULL, 
+                                 numb=100, 
+                                 nums=1000, 
+                                 numi=5, 
+                                 S0=NULL,
+                                 K0=NULL) {
   # Y: numeric vector (length T)
   # hypers: list with either alpha0/gamma or alpha0_a,alpha0_b,gamma_a,gamma_b, and mu_0, sigma2_0, sigma2
   # numb: burn-in iterations
@@ -14,10 +19,17 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL, numb=100, nums=1000, numi=5, S0
   if(is.null(hypers)){
     hypers$alpha0=1
     hypers$gamma=1
+    hypers$sigma2=1.5
+    hypers$mu_0=0
+    hypers$sigma2_0=1
   }
   
   if(is.null(S0)){
-    S0=sample(1:2,Tlen,replace=T)
+    # How to initialize states with iHMM?
+    if(is.null(K0)){
+      K0=3
+    }
+    S0=sample(1:K0,Tlen,replace=T)
   }
   
   sample$S <- as.integer(S0)
@@ -74,9 +86,13 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL, numb=100, nums=1000, numi=5, S0
     u <- numeric(Tlen)
     for (t in 1:Tlen) {
       if (t == 1L) {
-        u[t] <- runif(1L) * sample$Pi[1L, sample$S[t]]
+        set.seed(1)
+        #u[t] <- runif(1L) * sample$Pi[1L, sample$S[t]]
+        u[t] <- runif(1L, max = sample$Pi[1L, sample$S[t]])
+        
       } else {
-        u[t] <- runif(1L) * sample$Pi[sample$S[t - 1L], sample$S[t]]
+        #u[t] <- runif(1L) * sample$Pi[sample$S[t - 1L], sample$S[t]]
+        u[t] <- runif(1L, max =sample$Pi[sample$S[t - 1L], sample$S[t]])
       }
     }
     
@@ -147,12 +163,13 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL, numb=100, nums=1000, numi=5, S0
     
     # Backtrack to sample a path
     if (sum(dyn_prog[, Tlen]) != 0 && is.finite(sum(dyn_prog[, Tlen]))) {
-      sample$S[Tlen] <- sample_categorical(dyn_prog[, Tlen])
+      sample$S[Tlen] <- sample(length(dyn_prog[, Tlen]), 1L, prob = dyn_prog[, Tlen])
       
       for (t in (Tlen - 1L):1L) {
         r <- dyn_prog[, t] * as.numeric(sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
         r <- r / sum(r)
-        sample$S[t] <- sample_categorical(r)
+        #sample$S[t] <- sample_categorical(r)
+        sample$S[t] <-sample(length(dyn_prog[, Tlen]), 1L, prob = dyn_prog[, Tlen])
       }
       
       # Cleanup: remove unused states
