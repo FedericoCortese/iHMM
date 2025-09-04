@@ -85,13 +85,13 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
     u <- numeric(Tlen)
     for (t in 1:Tlen) {
       if (t == 1L) {
-        set.seed(1)
-        #u[t] <- runif(1L) * sample$Pi[1L, sample$S[t]]
-        u[t] <- runif(1L, max = sample$Pi[1L, sample$S[t]])
+        #set.seed(1)
+        u[t] <- runif(1L) * sample$Pi[1L, sample$S[t]]
+        #u[t] <- runif(1L, max = sample$Pi[1L, sample$S[t]])
         
       } else {
-        #u[t] <- runif(1L) * sample$Pi[sample$S[t - 1L], sample$S[t]]
-        u[t] <- runif(1L, max =sample$Pi[sample$S[t - 1L], sample$S[t]])
+        u[t] <- runif(1L) * sample$Pi[sample$S[t - 1L], sample$S[t]]
+        #u[t] <- runif(1L, max =sample$Pi[sample$S[t - 1L], sample$S[t]])
       }
     }
     
@@ -141,34 +141,58 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
     # Forward dynamic program on truncated trellis
     dyn_prog <- matrix(0, nrow = sample$K, ncol = Tlen)
     
-    dyn_prog[, 1L] <- as.numeric(sample$Pi[1L, 1:sample$K] > u[1L])
-    stats$trellis[iter] <- stats$trellis[iter] + sum(dyn_prog[, 1L])
+    #dyn_prog[, 1L] <- as.numeric(sample$Pi[1L, 1:sample$K] > u[1L])
+    # stats$trellis[iter] <- stats$trellis[iter] + sum(dyn_prog[, 1L])
+    # 
+    # for (k in 1:sample$K) {
+    #   dyn_prog[k, 1L] <- exp(-0.5 * (Y[1L] - sample$Mus[k]) * (Y[1L] - sample$Mus[k]) / hypers$sigma2) * dyn_prog[k, 1L]
+    # }
+    # dyn_prog[, 1L] <- dyn_prog[, 1L] / sum(dyn_prog[, 1L])
+    # 
+    # for (t in 2:Tlen) {
+    #   A <- (sample$Pi[1:sample$K, 1:sample$K, drop = FALSE] > u[t])
+    #   dyn_prog[, t] <- t(A) %*% dyn_prog[, t - 1L]
+    #   stats$trellis[iter] <- stats$trellis[iter] + sum(A)
+    #   
+    #   for (k in 1:sample$K) {
+    #     dyn_prog[k, t] <- exp(-0.5 * (Y[t] - sample$Mus[k]) * (Y[t] - sample$Mus[k]) / hypers$sigma2) * dyn_prog[k, t]
+    #   }
+    #   dyn_prog[, t] <- dyn_prog[, t] / sum(dyn_prog[, t])
+    # }
     
+    # t = 1
+    dyn_prog[, 1L] <- sample$Pi[1L, 1:sample$K] * (sample$Pi[1L, 1:sample$K] > u[1L])
+    # likelihood (emissione)
     for (k in 1:sample$K) {
-      dyn_prog[k, 1L] <- exp(-0.5 * (Y[1L] - sample$Mus[k]) * (Y[1L] - sample$Mus[k]) / hypers$sigma2) * dyn_prog[k, 1L]
+      dyn_prog[k, 1L] <- dnorm(Y[1L], mean = sample$Mus[k], sd = sqrt(hypers$sigma2)) * dyn_prog[k, 1L]
     }
-    dyn_prog[, 1L] <- dyn_prog[, 1L] / sum(dyn_prog[, 1L])
+    s <- sum(dyn_prog[, 1L]); if (s == 0 || !is.finite(s)) next else dyn_prog[, 1L] <- dyn_prog[, 1L] / s
     
+    # t = 2..T
     for (t in 2:Tlen) {
-      A <- (sample$Pi[1:sample$K, 1:sample$K, drop = FALSE] > u[t])
+      A <- sample$Pi[1:sample$K, 1:sample$K] * (sample$Pi[1:sample$K, 1:sample$K] > u[t])
       dyn_prog[, t] <- t(A) %*% dyn_prog[, t - 1L]
-      stats$trellis[iter] <- stats$trellis[iter] + sum(A)
-      
       for (k in 1:sample$K) {
-        dyn_prog[k, t] <- exp(-0.5 * (Y[t] - sample$Mus[k]) * (Y[t] - sample$Mus[k]) / hypers$sigma2) * dyn_prog[k, t]
+        dyn_prog[k, t] <- dnorm(Y[t], mean = sample$Mus[k], sd = sqrt(hypers$sigma2)) * dyn_prog[k, t]
       }
-      dyn_prog[, t] <- dyn_prog[, t] / sum(dyn_prog[, t])
+      s <- sum(dyn_prog[, t]); if (s == 0 || !is.finite(s)) next else dyn_prog[, t] <- dyn_prog[, t] / s
     }
     
     # Backtrack to sample a path
     if (sum(dyn_prog[, Tlen]) != 0 && is.finite(sum(dyn_prog[, Tlen]))) {
-      sample$S[Tlen] <- sample(length(dyn_prog[, Tlen]), 1L, prob = dyn_prog[, Tlen])
-      
+      # sample$S[Tlen] <- sample(length(dyn_prog[, Tlen]), 1L, prob = dyn_prog[, Tlen])
+      # 
+      # for (t in (Tlen - 1L):1L) {
+      #   r <- dyn_prog[, t] * as.numeric(sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
+      #   r <- r / sum(r)
+      #   sample$S[t] <- sample_categorical(r)
+      #   #sample$S[t] <-sample(length(dyn_prog[, Tlen]), 1L, prob = r)
+      # }
+      sample$S[Tlen] <- sample_categorical(dyn_prog[, Tlen])
       for (t in (Tlen - 1L):1L) {
-        r <- dyn_prog[, t] * as.numeric(sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
-        r <- r / sum(r)
-        #sample$S[t] <- sample_categorical(r)
-        sample$S[t] <-sample(length(dyn_prog[, Tlen]), 1L, prob = dyn_prog[, Tlen])
+        trans <- sample$Pi[, sample$S[t + 1L]] * (sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
+        r <- dyn_prog[, t] * trans
+        sample$S[t] <- sample_categorical(r)
       }
       
       # Cleanup: remove unused states
