@@ -51,8 +51,7 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
   if (!is.null(hypers$alpha0)) {
     sample$alpha0 <- hypers$alpha0
   } else {
-    # MATLAB: gamrnd(shape, scale). Here: rgamma(shape=., rate=.)
-    sample$alpha0 <- rgamma(1L, shape = hypers$alpha0_a, rate = hypers$alpha0_b)
+      sample$alpha0 <- rgamma(1L, shape = hypers$alpha0_a, rate = hypers$alpha0_b)
   }
   if (!is.null(hypers$gamma)) {
     sample$gamma <- hypers$gamma
@@ -293,40 +292,67 @@ iHmmHyperSample <- function(S, ibeta, ialpha0, igamma, hypers, numi) {
   
   # N: transition counts (K x K)
   N <- matrix(0, nrow = K, ncol = K)
-  N[1L, S[1L]] <- N[1L, S[1L]] + 1L
+  #N[1L, S[1L]] <- N[1L, S[1L]] + 1L
+  N[1L, S[1L]] <- 1L
   for (t in 2:Tlen) {
     N[S[t - 1L], S[t]] <- N[S[t - 1L], S[t]] + 1L
   }
   
   # M: number of components (K x K)
+  # M <- matrix(0, nrow = K, ncol = K)
+  # for (j in 1:K) {
+  #   for (k in 1:K) {
+  #     if (N[j, k] > 0) {
+  #       for (ell in 1:N[j, k]) {
+  #         num <- ialpha0 * ibeta[k]
+  #         denom <- num + ell - 1
+  #         if (is.finite(num) && is.finite(denom) && denom > 0 && num >= 0) {
+  #           p <- num / denom
+  #           # Safety check for p
+  #           p <- max(min(p, 1), 0)
+  #           if (!is.na(p) && p >= 0 && p <= 1) {
+  #             M[j, k] <- M[j, k] + rbinom(1L, size = 1L, prob = p)
+  #           }
+  #         }
+  #       }
+  #     }
+  #   }
+  # }
+  
   M <- matrix(0, nrow = K, ncol = K)
+  # M[j,k]: quante componenti indipendenti hanno generato queste transizioni da j a k
+  
   for (j in 1:K) {
     for (k in 1:K) {
-      if (N[j, k] > 0) {
-        for (ell in 1:N[j, k]) {
-          num <- ialpha0 * ibeta[k]
-          denom <- num + ell - 1
-          if (is.finite(num) && is.finite(denom) && denom > 0 && num >= 0) {
-            p <- num / denom
-            # Safety check for p
-            p <- max(min(p, 1), 0)
-            if (!is.na(p) && p >= 0 && p <= 1) {
-              M[j, k] <- M[j, k] + rbinom(1L, size = 1L, prob = p)
-            }
-          }
+      if (N[j, k] == 0) {
+        M[j, k] <- 0
+      } else {
+        for (l in 1:N[j, k]) {
+          #Ciclo su ogni transizione osservata (ogni “cliente” che ordina piatto 𝑘nel ristorante 𝑗)
+          
+          p <- (ialpha0 * ibeta[k]) / (ialpha0 * ibeta[k] + l - 1)
+          # Per ognuna, decido se essa dà origine a un nuovo tavolo indipendente con probabilità 𝑝
+          
+          M[j, k] <- M[j, k] + as.integer(runif(1) < p)
+          # Con runif(1) < p, ottengo 1 (nuovo tavolo) oppure 0 (si unisce a un tavolo già aperto)
+          # Sommo questi indicatori
         }
       }
     }
   }
   
+  
   # Resample Beta ~ Dirichlet([m_.k]_{k=1..K}, gamma)
   m_dotk <- colSums(M)
+  # numero di tavoli (in tutti i ristoranti) che servono il piatto/stato 𝑘
+  
   ibeta  <- dirichlet_sample(c(m_dotk, igamma))
   
   # -- Se alpha0 è specificato, non ricampionarlo --
   if (!is.null(hypers$alpha0)) {
     ialpha0 <- hypers$alpha0
   } else {
+    # Escobar and West
     for (iter in 1:numi) {
       Nj <- rowSums(N)
       w  <- rbeta(K, shape1 = ialpha0 + 1, shape2 = Nj)
