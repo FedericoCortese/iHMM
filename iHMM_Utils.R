@@ -51,12 +51,14 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
   if (!is.null(hypers$alpha0)) {
     sample$alpha0 <- hypers$alpha0
   } else {
-      sample$alpha0 <- rgamma(1L, shape = hypers$alpha0_a, rate = hypers$alpha0_b)
+      #sample$alpha0 <- rgamma(1L, shape = hypers$alpha0_a, rate = hypers$alpha0_b)
+      sample$alpha0 <- rgamma(1L, shape = hypers$alpha0_a, scale = 1 / hypers$alpha0_b)
   }
   if (!is.null(hypers$gamma)) {
     sample$gamma <- hypers$gamma
   } else {
-    sample$gamma <- rgamma(1L, shape = hypers$gamma_a, rate = hypers$gamma_b)
+    #sample$gamma <- rgamma(1L, shape = hypers$gamma_a, rate = hypers$gamma_b)
+    sample$gamma <- rgamma(1L, shape = hypers$alpha0_a, scale = 1 / hypers$gamma_b)
   }
   
   for (i in 1:5) {
@@ -67,8 +69,10 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
     sample$gamma  <- tmp$gamma
   }
   
-  # Sample the emission and transition probabilities.
+  # Sample the emission probabilities.
   sample$Mus <- SampleNormalMeans_R(sample$S, Y, sample$K, hypers$sigma2, hypers$mu_0, hypers$sigma2_0)
+  
+  # Sample the transition probabilities.
   sample$Pi  <- SampleTransitionMatrix(sample$S, sample$alpha0 * sample$Beta)
   # Remove the (K+1)-th row 
   sample$Pi  <- sample$Pi[-(sample$K + 1L), , drop = FALSE]
@@ -141,28 +145,8 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
     # Forward dynamic program on truncated trellis
     dyn_prog <- matrix(0, nrow = sample$K, ncol = Tlen)
     
-    #dyn_prog[, 1L] <- as.numeric(sample$Pi[1L, 1:sample$K] > u[1L])
-    # stats$trellis[iter] <- stats$trellis[iter] + sum(dyn_prog[, 1L])
-    # 
-    # for (k in 1:sample$K) {
-    #   dyn_prog[k, 1L] <- exp(-0.5 * (Y[1L] - sample$Mus[k]) * (Y[1L] - sample$Mus[k]) / hypers$sigma2) * dyn_prog[k, 1L]
-    # }
-    # dyn_prog[, 1L] <- dyn_prog[, 1L] / sum(dyn_prog[, 1L])
-    # 
-    # for (t in 2:Tlen) {
-    #   A <- (sample$Pi[1:sample$K, 1:sample$K, drop = FALSE] > u[t])
-    #   dyn_prog[, t] <- t(A) %*% dyn_prog[, t - 1L]
-    #   stats$trellis[iter] <- stats$trellis[iter] + sum(A)
-    #   
-    #   for (k in 1:sample$K) {
-    #     dyn_prog[k, t] <- exp(-0.5 * (Y[t] - sample$Mus[k]) * (Y[t] - sample$Mus[k]) / hypers$sigma2) * dyn_prog[k, t]
-    #   }
-    #   dyn_prog[, t] <- dyn_prog[, t] / sum(dyn_prog[, t])
-    # }
-    
     # t = 1
-    dyn_prog[, 1L] <- sample$Pi[1L, 1:sample$K] * (sample$Pi[1L, 1:sample$K] > u[1L])
-    # likelihood (emissione)
+    dyn_prog[, 1L] <- as.numeric(sample$Pi[1L, 1:sample$K] > u[1L])
     for (k in 1:sample$K) {
       dyn_prog[k, 1L] <- dnorm(Y[1L], mean = sample$Mus[k], sd = sqrt(hypers$sigma2)) * dyn_prog[k, 1L]
     }
@@ -170,7 +154,7 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
     
     # t = 2..T
     for (t in 2:Tlen) {
-      A <- sample$Pi[1:sample$K, 1:sample$K] * (sample$Pi[1:sample$K, 1:sample$K] > u[t])
+      A <- (sample$Pi[1:sample$K, 1:sample$K] > u[t]) * 1.0   # matrice di indicatori 0/1
       dyn_prog[, t] <- t(A) %*% dyn_prog[, t - 1L]
       for (k in 1:sample$K) {
         dyn_prog[k, t] <- dnorm(Y[t], mean = sample$Mus[k], sd = sqrt(hypers$sigma2)) * dyn_prog[k, t]
@@ -180,17 +164,11 @@ iHmmNormalSampleBeam <- function(Y, hypers=NULL,
     
     # Backtrack to sample a path
     if (sum(dyn_prog[, Tlen]) != 0 && is.finite(sum(dyn_prog[, Tlen]))) {
-      # sample$S[Tlen] <- sample(length(dyn_prog[, Tlen]), 1L, prob = dyn_prog[, Tlen])
-      # 
-      # for (t in (Tlen - 1L):1L) {
-      #   r <- dyn_prog[, t] * as.numeric(sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
-      #   r <- r / sum(r)
-      #   sample$S[t] <- sample_categorical(r)
-      #   #sample$S[t] <-sample(length(dyn_prog[, Tlen]), 1L, prob = r)
-      # }
+      
+      # Backtracking
       sample$S[Tlen] <- sample_categorical(dyn_prog[, Tlen])
       for (t in (Tlen - 1L):1L) {
-        trans <- sample$Pi[, sample$S[t + 1L]] * (sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
+        trans <- as.numeric(sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
         r <- dyn_prog[, t] * trans
         sample$S[t] <- sample_categorical(r)
       }
@@ -290,7 +268,7 @@ sample_categorical <- function(p) {
   which.max(runif(1L) <= cumsum(p))
 }
 
-# SampleNormalMeans (R version)
+# SampleNormalMeans 
 SampleNormalMeans_R <- function(S, Y, K, sigma2, mu_0, sigma2_0) {
   Mus <- numeric(K)
   for (k in 1:K) {
@@ -390,7 +368,8 @@ iHmmHyperSample <- function(S, ibeta, ialpha0, igamma, hypers, numi) {
       rate  <- hypers$alpha0_b - sum(log(w))
       
       if (is.finite(shape) && is.finite(rate) && shape > 0 && rate > 0) {
-        ialpha0 <- rgamma(1L, shape = shape, rate = rate)
+        #ialpha0 <- rgamma(1L, shape = shape, rate = rate)
+        ialpha0 <- rgamma(1L, shape = shape, scale = 1 / rate)
       }
     }
   }
@@ -410,7 +389,8 @@ iHmmHyperSample <- function(S, ibeta, ialpha0, igamma, hypers, numi) {
       shape <- if (runif(1L) < pi_mu) hypers$gamma_a + k else hypers$gamma_a + k - 1
       rate  <- hypers$gamma_b - log(mu)
       if (is.finite(shape) && is.finite(rate) && shape > 0 && rate > 0) {
-        igamma <- rgamma(1L, shape = shape, rate = rate)
+        #igamma <- rgamma(1L, shape = shape, rate = rate)
+        igamma  <- rgamma(1L, shape = shape, scale = 1 / rate)
       }
     }
   }
@@ -546,3 +526,278 @@ sim_data_stud_t=function(seed=123,
     seed=seed))
   
 }
+
+
+# von Mises ---------------------------------------------------------------
+
+# SampleVonMisesMeans (mu | kappa fixed)
+SampleVonMisesMeans_R <- function(S, Y, K, kappa) {
+  Mus <- numeric(K)
+  for (k in 1:K) {
+    Ys <- Y[S == k]
+    N  <- length(Ys)
+    if (N == 0L) {
+      # nessun dato: prior uniforme su [0, 2pi)
+      Mus[k] <- runif(1, 0, 2*pi)
+    } else {
+      C <- mean(cos(Ys))
+      S <- mean(sin(Ys))
+      mu_hat <- atan2(S, C)             # media circolare
+      R <- sqrt(C^2 + S^2)              # lunghezza risultante normalizzata
+      Mus[k] <- as.numeric(
+        rvonmises(1, mu = circular(mu_hat), kappa = R * kappa)
+      )
+    }
+  }
+  Mus
+}
+
+library(circular)
+# iHMM con emissioni von Mises
+iHmmvonMisesSampleBeam <- function(Y, hypers=NULL, 
+                                   numb=100, 
+                                   nums=1000, 
+                                   numi=5, 
+                                   S0=NULL,
+                                   K0=NULL) {
+  # Y: numeric vector (length T)
+  # hypers: list con alpha0, gamma, kappa
+  # numb: burn-in iterations
+  # nums: number of posterior samples to keep
+  # numi: thinning (iterations between kept samples)
+  # S0: integer vector of initial states (length T)
+  
+  Tlen <- length(Y)
+  
+  sample <- list()
+  
+  if (is.null(hypers)) {
+    hypers$alpha0 = 1
+    hypers$gamma  = 1
+    hypers$kappa  = 5
+  }
+  
+  if (is.null(S0)) {
+    if (is.null(K0)) {
+      K0=3
+    }
+    S0=sample(1:K0, Tlen, replace=TRUE)
+  }
+  
+  sample$S <- as.integer(S0)
+  sample$K <- max(sample$S)
+  
+  niter <- numb + (nums - 1L) * numi
+  
+  S_out <- list()
+  stats <- list(
+    K       = numeric(niter),
+    alpha0  = numeric(niter),
+    gamma   = numeric(niter),
+    trellis = numeric(niter)
+  )
+  
+  # Initialize hypers; resample a few times
+  if (!is.null(hypers$alpha0)) {
+    sample$alpha0 <- hypers$alpha0
+  } else {
+    sample$alpha0 <- rgamma(1L, shape = hypers$alpha0_a, scale = 1 / hypers$alpha0_b)
+  }
+  if (!is.null(hypers$gamma)) {
+    sample$gamma <- hypers$gamma
+  } else {
+    sample$gamma <- rgamma(1L, shape = hypers$gamma_a, scale = 1 / hypers$gamma_b)
+  }
+  
+  for (i in 1:5) {
+    sample$Beta <- rep(1 / (sample$K + 1L), sample$K + 1L)
+    tmp <- iHmmHyperSample(sample$S, sample$Beta, sample$alpha0, sample$gamma, hypers, 20L)
+    sample$Beta   <- tmp$Beta
+    sample$alpha0 <- tmp$alpha0
+    sample$gamma  <- tmp$gamma
+  }
+  
+  # Sample the emission means (von Mises)
+  sample$Mus <- SampleVonMisesMeans_R(sample$S, Y, sample$K, hypers$kappa)
+  
+  # Sample the transition probabilities
+  sample$Pi  <- SampleTransitionMatrix(sample$S, sample$alpha0 * sample$Beta)
+  sample$Pi  <- sample$Pi[-(sample$K + 1L), , drop = FALSE]
+  
+  iter <- 1L
+  cat(sprintf("Iteration 0: K = %d, alpha0 = %f, gamma = %f.\n", 
+              sample$K, sample$alpha0, sample$gamma))
+  
+  while (iter <= niter) {
+    
+    stats$trellis[iter] <- 0
+    
+    # Sample auxiliary variables u
+    u <- numeric(Tlen)
+    for (t in 1:Tlen) {
+      if (t == 1L) {
+        u[t] <- runif(1L) * sample$Pi[1L, sample$S[t]]
+      } else {
+        u[t] <- runif(1L) * sample$Pi[sample$S[t - 1L], sample$S[t]]
+      }
+    }
+    
+    # Extend Pi and Mus while needed
+    while (max(sample$Pi[, ncol(sample$Pi)]) > min(u)) {
+      
+      pl <- ncol(sample$Pi)
+      bl <- length(sample$Beta)
+      
+      stopifnot(bl == pl)
+      
+      sample$Pi <- rbind(sample$Pi, dirichlet_sample(sample$alpha0 * sample$Beta))
+      
+      sample$Mus <- c(sample$Mus, runif(1, 0, 2*pi))  # nuovo stato inizializzato uniforme
+      
+      be <- sample$Beta[length(sample$Beta)]
+      bg <- rbeta(1L, 1, sample$gamma)
+      sample$Beta[length(sample$Beta)] <- bg * be
+      sample$Beta <- c(sample$Beta, (1 - bg) * be)
+    }
+    
+    sample$K <- nrow(sample$Pi)
+    
+    stopifnot(sample$K == (length(sample$Beta) - 1L))
+    stopifnot(sample$K == length(sample$Mus))
+    
+    # Forward dynamic program
+    dyn_prog <- matrix(0, nrow = sample$K, ncol = Tlen)
+    
+    # t = 1
+    dyn_prog[, 1L] <- as.numeric(sample$Pi[1L, 1:sample$K] > u[1L])
+    for (k in 1:sample$K) {
+      dyn_prog[k, 1L] <- dvonmises(Y[1L], mu = circular(sample$Mus[k]), 
+                                   kappa = hypers$kappa) * dyn_prog[k, 1L]
+    }
+    s <- sum(dyn_prog[, 1L]); if (s == 0 || !is.finite(s)) next else dyn_prog[, 1L] <- dyn_prog[, 1L] / s
+    
+    # t = 2..T
+    for (t in 2:Tlen) {
+      A <- (sample$Pi[1:sample$K, 1:sample$K] > u[t]) * 1.0
+      dyn_prog[, t] <- t(A) %*% dyn_prog[, t - 1L]
+      for (k in 1:sample$K) {
+        dyn_prog[k, t] <- dvonmises(Y[t], mu = circular(sample$Mus[k]), 
+                                    kappa = hypers$kappa) * dyn_prog[k, t]
+      }
+      s <- sum(dyn_prog[, t]); if (s == 0 || !is.finite(s)) next else dyn_prog[, t] <- dyn_prog[, t] / s
+    }
+    
+    # Backtrack
+    if (sum(dyn_prog[, Tlen]) != 0 && is.finite(sum(dyn_prog[, Tlen]))) {
+      
+      sample$S[Tlen] <- sample_categorical(dyn_prog[, Tlen])
+      for (t in (Tlen - 1L):1L) {
+        trans <- as.numeric(sample$Pi[, sample$S[t + 1L]] > u[t + 1L])
+        r <- dyn_prog[, t] * trans
+        sample$S[t] <- sample_categorical(r)
+      }
+      
+      # Remove unused states
+      zind <- setdiff(seq_len(sample$K), unique(sample$S))
+      zind <- sort(zind, decreasing = TRUE)
+      if (length(zind) > 0) {
+        for (i_rm in zind) {
+          sample$Beta[length(sample$Beta)] <- sample$Beta[length(sample$Beta)] + sample$Beta[i_rm]
+          sample$Beta <- sample$Beta[-i_rm]
+          sample$Pi   <- sample$Pi[, -i_rm, drop = FALSE]
+          sample$Pi   <- sample$Pi[-i_rm, , drop = FALSE]
+          sample$Mus  <- sample$Mus[-i_rm]
+          sample$S[sample$S > i_rm] <- sample$S[sample$S > i_rm] - 1L
+        }
+        sample$K <- nrow(sample$Pi)
+      }
+      
+      # Resample Beta e hyper
+      tmp <- iHmmHyperSample(sample$S, sample$Beta, sample$alpha0, sample$gamma, hypers, 20L)
+      sample$Beta   <- tmp$Beta
+      sample$alpha0 <- tmp$alpha0
+      sample$gamma  <- tmp$gamma
+      
+      # Resample emissioni von Mises
+      sample$Mus <- SampleVonMisesMeans_R(sample$S, Y, sample$K, hypers$kappa)
+      
+      # Resample transizioni
+      sample$Pi <- SampleTransitionMatrix(sample$S, sample$alpha0 * sample$Beta)
+      sample$Pi <- sample$Pi[-(sample$K + 1L), , drop = FALSE]
+      
+      # Stats
+      stats$alpha0[iter] <- sample$alpha0
+      stats$gamma[iter]  <- sample$gamma
+      stats$K[iter]      <- sample$K
+      
+      cat(sprintf("Iteration: %d: K = %d, alpha0 = %f, gamma = %f.\n",
+                  iter, sample$K, sample$alpha0, sample$gamma))
+      
+      if (iter >= numb && ((iter - numb) %% numi == 0L)) {
+        S_out[[length(S_out) + 1L]] <- list(
+          S      = sample$S,
+          K      = sample$K,
+          Beta   = sample$Beta,
+          Pi     = sample$Pi,
+          Mus    = sample$Mus,
+          alpha0 = sample$alpha0,
+          gamma  = sample$gamma
+        )
+      }
+      
+      iter <- iter + 1L
+    } else {
+      cat("Wasted computation as there were no paths through the iHMM.\n")
+    }
+  }
+  
+  list(S = S_out, stats = stats)
+}
+
+
+sim_data_vonmises <- function(seed = 123,
+                              TT,
+                              Ktrue = 3,
+                              mu_vec,
+                              kappa_vec,
+                              pers = 0.95) {
+  # mu_vec: vettore di lunghezza Ktrue con i mu per ciascuno stato
+  # kappa_vec: vettore di lunghezza Ktrue con i kappa per ciascuno stato
+  # TT: lunghezza serie temporale
+  # pers: probabilità di rimanere nello stesso stato
+  
+  stopifnot(length(mu_vec) == Ktrue)
+  stopifnot(length(kappa_vec) == Ktrue)
+  
+  # Catena di Markov
+  x <- numeric(TT)
+  Q <- matrix(rep((1 - pers) / (Ktrue - 1), Ktrue * Ktrue), 
+              ncol = Ktrue, byrow = TRUE)
+  diag(Q) <- rep(pers, Ktrue)
+  init <- rep(1 / Ktrue, Ktrue)
+  
+  set.seed(seed)
+  x[1] <- sample(1:Ktrue, 1, prob = init)
+  for (i in 2:TT) {
+    x[i] <- sample(1:Ktrue, 1, prob = Q[x[i - 1], ])
+  }
+  
+  # Osservazioni da von Mises
+  Y <- numeric(TT)
+  for (i in 1:TT) {
+    k <- x[i]
+    Y[i] <- as.numeric(rvonmises(1, mu = circular(mu_vec[k]), kappa = kappa_vec[k]))
+  }
+  
+  return(list(
+    Y = Y,            # osservazioni generate
+    mchain = x,       # stati latenti
+    TT = TT,
+    K = Ktrue,
+    mu_vec = mu_vec,
+    kappa_vec = kappa_vec,
+    pers = pers,
+    seed = seed
+  ))
+}
+
